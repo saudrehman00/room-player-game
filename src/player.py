@@ -1,3 +1,4 @@
+#!/usr/bin/python3
 import socket
 import signal
 import sys
@@ -27,21 +28,29 @@ inventory = []
 
 # Directions that are possible.
 
-connections = { 
-    "north" : "",
-    "south" : "",
-    "east" : "",
-    "west" : "",
-    "up" : "",
-    "down" : ""
-    }
+connections = {
+    "north": "",
+    "south": "",
+    "east": "",
+    "west": "",
+    "up": "",
+    "down": ""
+}
+
+# Discovery Service constants
+
+DISCOVERYHOST = ''
+DISCOVERYPORT = 5000
+DISCOVERYSERVER = (DISCOVERYHOST, DISCOVERYPORT)
+TIMEOUT = 5
 
 # Signal handler for graceful exiting.  Let the server know when we're gone.
 
+
 def signal_handler(sig, frame):
     print('Interrupt received, shutting down ...')
-    message='exit'
-    client_socket.sendto(message.encode(),server)
+    message = 'exit'
+    client_socket.sendto(message.encode(), server)
     for item in inventory:
         message = f'drop {item}'
         client_socket.sendto(message.encode(), server)
@@ -49,12 +58,14 @@ def signal_handler(sig, frame):
 
 # Simple function for setting up a prompt for the user.
 
+
 def do_prompt(skip_line=False):
     if (skip_line):
         print("")
     print("> ", end='', flush=True)
 
 # Function to join a room.
+
 
 def join_room():
     message = f'join {name}'
@@ -69,6 +80,7 @@ def join_room():
     print(response.decode())
 
 # Function to handle commands from the user, checking them over and sending to the server as needed.
+
 
 def process_command(command):
 
@@ -88,85 +100,125 @@ def process_command(command):
             print(f'You are not holding {words[1]}')
             return
 
-    # Send command to server, if it isn't a local only one.
+    try:
+        # Send command to server, if it isn't a local only one.
 
-    if (command != 'inventory'):
-        message = f'{command}'
-        client_socket.sendto(message.encode(), server)
-
-    # Check for particular commands of interest from the user.
-
-    # If we exit, we have to drop everything in our inventory into the room.
-
-    if (command == 'exit'):
-        for item in inventory:
-            message = f'drop {item}'
+        if (command != 'inventory'):
+            message = f'{command}'
+            client_socket.settimeout(TIMEOUT)
             client_socket.sendto(message.encode(), server)
-        sys.exit(0)
 
-    # If we look, we will be getting the room description to display.
+        # Check for particular commands of interest from the user.
 
-    elif (command == 'look'):
-        response, addr = client_socket.recvfrom(1024)
-        print(response.decode())
+        # If we exit, we have to drop everything in our inventory into the room.
 
-    # If we inventory, we never really reached out to the room, so we just display what we have.
-
-    elif (command == 'inventory'):
-        print("You are holding:")
-        if (len(inventory) == 0):
-            print('  No items')
-        else:
+        if (command == 'exit'):
             for item in inventory:
-                print(f'  {item}')
+                message = f'drop {item}'
+                client_socket.sendto(message.encode(), server)
+            sys.exit(0)
 
-    # If we take an item, we let the server know and put it in our inventory, assuming we could take it.
+        # If we look, we will be getting the room description to display.
 
-    elif (words[0] == 'take'):
-        response, addr = client_socket.recvfrom(1024)
-        print(response.decode())
-        words = response.decode().split()
-        if ((len(words) == 2) and (words[1] == 'taken')):
-            inventory.append(words[0])
-
-    # If we drop an item, we remove it from our inventory and give it back to the room.
-
-    elif (words[0] == 'drop'):
-        response, addr = client_socket.recvfrom(1024)
-        print(response.decode())
-        inventory.remove(words[1])
-
-    # If we're wanting to go in a direction, we check with the room and it will tell us if it's a valid
-    # direction.  We can then join the new room as we know we've been dropped already from the other one.
-
-    elif (words[0] in connections):
-        response, addr = client_socket.recvfrom(1024)
-        if (response.decode().startswith("room://")):
-            server_address = urlparse(response.decode())
-            host = server_address.hostname
-            port = server_address.port
-            server = (host, port)     
-            join_room()      
-        else:
+        elif (command == 'look'):
+            response, addr = client_socket.recvfrom(1024)
             print(response.decode())
 
-    # The player wants to say something ... print the response.
+        # If we inventory, we never really reached out to the room, so we just display what we have.
 
-    elif (words[0] == 'say'):
-        response, addr = client_socket.recvfrom(1024)
-        print(response.decode())
-        
-    # Otherwise, it's an invalid command so we report it.
+        elif (command == 'inventory'):
+            print("You are holding:")
+            if (len(inventory) == 0):
+                print('  No items')
+            else:
+                for item in inventory:
+                    print(f'  {item}')
 
-    else:
-        response, addr = client_socket.recvfrom(1024)
-        print(response.decode())
+        # If we take an item, we let the server know and put it in our inventory, assuming we could take it.
+
+        elif (words[0] == 'take'):
+            response, addr = client_socket.recvfrom(1024)
+            print(response.decode())
+            words = response.decode().split()
+            if ((len(words) == 2) and (words[1] == 'taken')):
+                inventory.append(words[0])
+
+        # If we drop an item, we remove it from our inventory and give it back to the room.
+
+        elif (words[0] == 'drop'):
+            response, addr = client_socket.recvfrom(1024)
+            print(response.decode())
+            inventory.remove(words[1])
+
+        # If we're wanting to go in a direction, we check with the room and it will tell us if it's a valid
+        # direction.  We can then join the new room as we know we've been dropped already from the other one.
+
+        elif (words[0] in connections):
+            response, addr = client_socket.recvfrom(1024)
+            if response.decode().split()[0] == "NOTOK":
+                print(response.decode().replace("NOTOK", ""))
+                sys.exit(1)
+            discoverRoom(response.decode())
+            join_room()
+
+        # The player wants to say something ... print the response.
+
+        elif (words[0] == 'say'):
+            response, addr = client_socket.recvfrom(1024)
+            print(response.decode())
+
+        # Otherwise, it's an invalid command so we report it.
+
+        else:
+            response, addr = client_socket.recvfrom(1024)
+            print(response.decode())
+
+        client_socket.settimeout(None)
+    except TimeoutError:
+        print("Something Bad Happened")
+        sys.exit(1)
+
+# Function to handle lookup requests
+
+
+def discoverRoom(name):
+    global host
+    global port
+    global server
+    discovery_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    discovery_socket.settimeout(5)
+    try:
+        discovery_socket.sendto(f"lookup {name}".encode(), DISCOVERYSERVER)
+        message, addr = discovery_socket.recvfrom(1024)
+        # print(message.decode(),addr)
+        words = message.decode().split()
+        if words[0] == "OK" and len(words) == 2:
+            try:
+                server_address = urlparse(words[1])
+                if ((server_address.scheme != 'room') or (server_address.port == None) or (server_address.hostname == None)):
+                    raise ValueError
+                host = server_address.hostname
+                port = server_address.port
+                server = (host, port)
+            except ValueError:
+                print(
+                    'Error:  Invalid server.  Enter a URL of the form:  room://host:port')
+                sys.exit(1)
+        else:
+            print(message.decode())
+            sys.exit(1)
+    except TimeoutError:
+        print('Error: Something Bad Happened')
+        sys.exit(1)
+    finally:
+        discovery_socket.close()
 
 # Function to handle incoming messages from room.  Also look for disconnect messages to shutdown.
 
+
 def handle_message_from_server(sock, mask):
     response, addr = client_socket.recvfrom(1024)
-    words=response.decode().split(' ')
+    words = response.decode().split(' ')
     print()
     if len(words) == 1 and words[0] == 'disconnect':
         print('Disconnected from server ... exiting!')
@@ -177,12 +229,14 @@ def handle_message_from_server(sock, mask):
 
 # Function to handle incoming messages from user.
 
+
 def handle_keyboard_input(file, mask):
-    line=sys.stdin.readline()[:-1]
+    line = sys.stdin.readline()[:-1]
     process_command(line)
     do_prompt()
 
 # Our main function.
+
 
 def main():
 
@@ -198,45 +252,36 @@ def main():
 
     parser = argparse.ArgumentParser()
     parser.add_argument("name", help="name for the player in the game")
-    parser.add_argument("server", help="URL indicating server location in form of room://host:port")
+    parser.add_argument(
+        "server", help="URL indicating server location in form of room://host:port")
     args = parser.parse_args()
 
     # Check the URL passed in and make sure it's valid.  If so, keep track of
     # things for later.
-
-    try:
-        server_address = urlparse(args.server)
-        if ((server_address.scheme != 'room') or (server_address.port == None) or (server_address.hostname == None)):
-            raise ValueError
-        host = server_address.hostname
-        port = server_address.port
-        server = (host, port)
-    except ValueError:
-        print('Error:  Invalid server.  Enter a URL of the form:  room://host:port')
-        sys.exit(1)
+    discoverRoom(args.server)
     name = args.name
 
     # Send message to enter the room.
-
     join_room()
 
     # Set up our selector.
 
-    #client_socket.setblocking(False)
-    sel.register(client_socket, selectors.EVENT_READ, handle_message_from_server)
+    # client_socket.setblocking(False)
+    sel.register(client_socket, selectors.EVENT_READ,
+                 handle_message_from_server)
     sel.register(sys.stdin, selectors.EVENT_READ, handle_keyboard_input)
-    
+
     # Prompt the user before beginning.
 
     do_prompt()
 
     # Now do the selection.
 
-    while(True):
+    while (True):
         events = sel.select()
         for key, mask in events:
             callback = key.data
-            callback(key.fileobj, mask)    
+            callback(key.fileobj, mask)
 
 
 if __name__ == '__main__':

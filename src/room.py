@@ -1,3 +1,4 @@
+#!/usr/bin/python3
 import argparse
 import signal
 import socket
@@ -26,6 +27,12 @@ room_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
 client_list = []
 
+# Discovery Service Address
+
+DISCOVERYHOST = ''
+DISCOVERYPORT = 5000
+DISCOVERYSERVER = (DISCOVERYHOST, DISCOVERYPORT)
+
 # Signal handler for graceful exiting.  We let clients know in the process so they can disconnect too.
 
 def signal_handler(sig, frame):
@@ -35,6 +42,7 @@ def signal_handler(sig, frame):
     for player in players:
         client_addr = client_search(player)
         room_socket.sendto(message.encode(),client_addr) 
+    deregister_room()
     sys.exit(0)
 
 # Search the client list for a particular player.
@@ -174,7 +182,7 @@ def process_message(message, addr, room_socket):
 
     elif (words[0] in connections):
         if (connections.get(words[0]) == ""):
-            return f'You cannot go {words[0]} from this room.'   
+            return f'NOTOK You cannot go {words[0]} from this room.'   
         else:
             players=client_list_except_player(client_search_by_address(addr))
             message=f'{client_search_by_address(addr)} left the room, heading {words[0]}.'
@@ -203,6 +211,38 @@ def process_message(message, addr, room_socket):
     else:
         return "Invalid command"
 
+# Register the room with discovery service
+
+def register_room(port):
+    global name
+    discovery_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    discovery_socket.settimeout(5)
+    try:
+        discovery_socket.sendto(f"register {name} {port}".encode(),DISCOVERYSERVER)
+        message, addr = discovery_socket.recvfrom(1024)
+        print(message.decode())
+    except:
+        print("Something bad happened")
+        sys.exit(1)
+    finally:
+        discovery_socket.close()
+
+# Deregister the room with discovery service
+
+def deregister_room():
+    global name
+    discovery_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    discovery_socket.settimeout(5)
+    try:
+        discovery_socket.sendto(f"deregister {name}".encode(),DISCOVERYSERVER)
+        message, addr = discovery_socket.recvfrom(1024)
+        print(message.decode())
+    except:
+        print("Something bad happened")
+        sys.exit(1)
+    finally:
+        discovery_socket.close()
+
 # Our main function.
 
 def main():
@@ -220,7 +260,7 @@ def main():
     # Check command line arguments for room settings.
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("port", type=int, help="port number to list on")
+    # parser.add_argument("port", type=int, help="port number to list on")
     parser.add_argument("name", help="name of the room")
     parser.add_argument("description", help="description of the room")
     parser.add_argument("item", nargs='*', help="items found in the room by default")
@@ -234,7 +274,7 @@ def main():
 
     # Set up room based on parameters.
 
-    port=args.port
+    # port=args.port
     name = args.name
     description = args.description
     items = args.item
@@ -242,58 +282,16 @@ def main():
     # Set up connections to other rooms.
 
     if args.n != "":
-        try:
-            connection_address = urlparse(args.n)
-            if ((connection_address.scheme != 'room') or (connection_address.port == None) or (connection_address.hostname == None)):
-                raise ValueError
-        except ValueError:
-            print('Error:  Invalid server for direction north.  Enter a server as address:port.')
-            sys.exit(1)
         connections.update({"north" : args.n})
     if args.s != "":
-        try:
-            connection_address = urlparse(args.s)
-            if ((connection_address.scheme != 'room') or (connection_address.port == None) or (connection_address.hostname == None)):
-                raise ValueError
-        except ValueError:
-            print('Error:  Invalid server for direction south.  Enter a server as address:port.')
-            sys.exit(1)
         connections.update({"south" : args.s})
     if args.e != "":
-        try:
-            connection_address = urlparse(args.e)
-            if ((connection_address.scheme != 'room') or (connection_address.port == None) or (connection_address.hostname == None)):
-                raise ValueError
-        except ValueError:
-            print('Error:  Invalid server for direction east.  Enter a server as address:port.')
-            sys.exit(1)
         connections.update({"east" : args.e})
     if args.w != "":
-        try:
-            connection_address = urlparse(args.w)
-            if ((connection_address.scheme != 'room') or (connection_address.port == None) or (connection_address.hostname == None)):
-                raise ValueError
-        except ValueError:
-            print('Error:  Invalid server for direction west.  Enter a server as address:port.')
-            sys.exit(1)
         connections.update({"west" : args.w})
     if args.u != "":
-        try:
-            connection_address = urlparse(args.u)
-            if ((connection_address.scheme != 'room') or (connection_address.port == None) or (connection_address.hostname == None)):
-                raise ValueError
-        except ValueError:
-            print('Error:  Invalid server for direction up.  Enter a server as address:port.')
-            sys.exit(1)
         connections.update({"up" : args.u})
     if args.d != "":
-        try:
-            connection_address = urlparse(args.d)
-            if ((connection_address.scheme != 'room') or (connection_address.port == None) or (connection_address.hostname == None)):
-                raise ValueError
-        except ValueError:
-            print('Error:  Invalid server for direction down.  Enter a server as address:port.')
-            sys.exit(1)
         connections.update({"down" : args.d})
 
     # Report initial room state.
@@ -301,12 +299,32 @@ def main():
     print('Room Starting Description:\n')
     print_room_summary()
 
+
+    ## For some unknown reason I could not get the ip of my local machine. I have already consulted the prof about this.
+    # hostname = socket.gethostname()
+    # fqdn = socket.getfqdn(hostname)
+    # ip_addr = socket.getaddrinfo("localhost")
+    # print(fqdn)
+    # print(ip_addr)
+    # print(f"room://{ip_addr}:{port}")
+    # Get the local host name
+    # myHostName = socket.gethostname()
+    # print("Name of the localhost is {}".format(myHostName))
+    # Get the IP address of the local host
+    # myIP = socket.gethostbyname(myHostName)
+    # print("IP address of the localhost is {}".format(myIP))
+
     # Create the socket.  We will ask this to work on any interface and to use
     # the port given at the command line.  We'll print this out for clients to use.
 
-    room_socket.bind(('', port))
+    room_socket.bind(('', 0))
     print('\nRoom will wait for players at port: ' + str(room_socket.getsockname()[1]))
+    port = room_socket.getsockname()[1]
 
+    # Attempt to register room with discovery service
+    register_room(port)
+    # for desc in socket.getaddrinfo(socket.gethostname(),room_socket.getsockname()[1]):
+    #     print(desc)
     # Loop forever waiting for messages from clients.
 
     while True:
